@@ -1,116 +1,115 @@
 import sys
 import random
-import os
 import pandas as pd
+import win32con
+import win32gui
+import win32api
 from PyQt5.QtWidgets import (
-    QApplication, QWidget, QPushButton, QVBoxLayout, QLabel, QMessageBox, QShortcut
+    QApplication, QWidget, QPushButton, QVBoxLayout, QLabel, QMessageBox
 )
-from PyQt5.QtGui import QFont, QKeySequence, QIcon
+from PyQt5.QtGui import QFont, QIcon
 from PyQt5.QtCore import Qt
+import threading
+import os
 
-
+# Hilfsfunktion für Ressourcen
 def resource_path(relative_path):
-    """ Holt den absoluten Pfad zu Ressourcen (CSV, ICO), auch wenn gebundelt """
     if hasattr(sys, '_MEIPASS'):
         return os.path.join(sys._MEIPASS, relative_path)
     return os.path.join(os.path.abspath("."), relative_path)
+
 CSV_FILE = resource_path("strats.csv")
 ICON_FILE = resource_path("icon.ico")
 
 class StratRoulette(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Rainbow 6: Strat Roulette")
+        self.setWindowTitle("Rainbow Six Siege: Strat Roulette")
         self.setWindowIcon(QIcon(ICON_FILE))
-        self.setGeometry(100, 100, 500, 350)
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #121212;
-                color: #ffffff;
-            }
-            QPushButton {
-                background-color: #2c2c2c;
-                border: 2px solid #444;
-                border-radius: 10px;
-                padding: 10px;
-                font-size: 16px;
-                color: #ffffff;
-            }
-            QPushButton:hover {
-                background-color: #3a3a3a;
-                border: 2px solid #0078d7;
-            }
-            QLabel#title {
-                font-size: 22px;
-                font-weight: bold;
-                color: #00ffcc;
-            }
-            QLabel#content {
-                font-size: 16px;
-                color: #dddddd;
-            }
-        """)
+        self.setGeometry(100, 100, 500, 300)
 
-        # Lade die CSV-Daten
-        try:
-            self.strats = pd.read_csv(CSV_FILE)
-        except FileNotFoundError:
-            QMessageBox.critical(self, "Fehler", f"Die Datei {CSV_FILE} wurde nicht gefunden!")
-            sys.exit(1)
+        font_title = QFont("Arial", 16, QFont.Bold)
+        font_content = QFont("Arial", 12)
 
-        # UI Elemente
-        self.label_name = QLabel("Rainbow Six Siege Strat Roulette")
-        self.label_name.setObjectName("title")
+        self.label_name = QLabel("🎲 Strat Name erscheint hier")
+        self.label_name.setFont(font_title)
         self.label_name.setAlignment(Qt.AlignCenter)
 
-        self.label_content = QLabel("Drücke einen Button oder F1/F2 zum Rollen")
-        self.label_content.setObjectName("content")
+        self.label_content = QLabel("📜 Strat Beschreibung erscheint hier")
+        self.label_content.setFont(font_content)
         self.label_content.setAlignment(Qt.AlignCenter)
         self.label_content.setWordWrap(True)
 
-        self.btn_attacker = QPushButton("🎲 Roll for Attacker")
-        self.btn_attacker.clicked.connect(lambda: self.roll_strat("Attacker"))
+        btn_attacker = QPushButton("Roll for Attacker (F1)")
+        btn_attacker.clicked.connect(lambda: self.roll_strat("Attacker"))
 
-        self.btn_defender = QPushButton("🎯 Roll for Defender")
-        self.btn_defender.clicked.connect(lambda: self.roll_strat("Defender"))
+        btn_defender = QPushButton("Roll for Defender (F2)")
+        btn_defender.clicked.connect(lambda: self.roll_strat("Defender"))
 
-        # Shortcuts (Hotkeys)
-        self.shortcut_attacker = QShortcut(QKeySequence("F1"), self)
-        self.shortcut_attacker.activated.connect(lambda: self.roll_strat("Attacker"))
-
-        self.shortcut_defender = QShortcut(QKeySequence("F2"), self)
-        self.shortcut_defender.activated.connect(lambda: self.roll_strat("Defender"))
-
-        # Layout
         layout = QVBoxLayout()
         layout.addWidget(self.label_name)
-        layout.addSpacing(15)
         layout.addWidget(self.label_content)
-        layout.addSpacing(20)
-        layout.addWidget(self.btn_attacker)
-        layout.addWidget(self.btn_defender)
-        layout.setSpacing(10)
+        layout.addWidget(btn_attacker)
+        layout.addWidget(btn_defender)
         self.setLayout(layout)
 
+        self.load_strats()
+
+    def load_strats(self):
+        try:
+            self.strats = pd.read_csv(CSV_FILE)
+        except Exception as e:
+            QMessageBox.critical(self, "Fehler", f"CSV konnte nicht geladen werden:\n{e}")
+            sys.exit(1)
+
     def roll_strat(self, role):
-        # Alle relevanten Strats für die Rolle holen
-        filtered_strats = self.strats[
+        filtered = self.strats[
             (self.strats["DefOAtkStrat"].str.lower() == role.lower()) |
             (self.strats["DefOAtkStrat"].str.lower() == "both")
         ]
-
-        if filtered_strats.empty:
+        if filtered.empty:
             self.label_name.setText("⚠️ Keine Strat gefunden")
             self.label_content.setText(f"Keine Strats für {role} verfügbar.")
             return
 
-        strat = filtered_strats.sample(1).iloc[0]
+        strat = filtered.sample(1).iloc[0]
         self.label_name.setText(f"{strat['StratName']} ({strat['DefOAtkStrat']})")
         self.label_content.setText(strat['StratContent'])
 
+# 🔥 Funktion für das unsichtbare Hotkey-Fenster
+def hotkey_listener(app_instance):
+    def win_proc(hwnd, msg, wparam, lparam):
+        if msg == win32con.WM_HOTKEY:
+            if wparam == 1:  # F1
+                app_instance.roll_strat("Attacker")
+            elif wparam == 2:  # F2
+                app_instance.roll_strat("Defender")
+        return win32gui.DefWindowProc(hwnd, msg, wparam, lparam)
+
+    wc = win32gui.WNDCLASS()
+    wc.lpfnWndProc = win_proc
+    wc.lpszClassName = "HiddenHotkeyWindow"
+    class_atom = win32gui.RegisterClass(wc)
+    hwnd = win32gui.CreateWindow(
+        class_atom,
+        "HiddenHotkeyWindow",
+        0,
+        0, 0, 0, 0,
+        0, 0, 0, None
+    )
+
+    # Hotkeys registrieren
+    win32gui.RegisterHotKey(hwnd, 1, 0, win32con.VK_F1)
+    win32gui.RegisterHotKey(hwnd, 2, 0, win32con.VK_F2)
+
+    win32gui.PumpMessages()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = StratRoulette()
     window.show()
+
+    # 🔥 Start Hotkey-Thread
+    threading.Thread(target=hotkey_listener, args=(window,), daemon=True).start()
+
     sys.exit(app.exec_())
